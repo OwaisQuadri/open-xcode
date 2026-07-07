@@ -4,6 +4,13 @@ set -euo pipefail
 raw_base="${OPEN_XCODE_RAW_BASE:-https://raw.githubusercontent.com/OwaisQuadri/open-xcode/main}"
 bin_dir="${OPEN_XCODE_BIN_DIR:-$HOME/.local/bin}"
 
+# Needs a real Xcode.app (any version) to open projects with.
+if ! mdfind "kMDItemCFBundleIdentifier == 'com.apple.dt.Xcode'" 2>/dev/null | grep -q . &&
+   ! ls -d /Applications/Xcode*.app >/dev/null 2>&1; then
+  echo "No Xcode found. Install Xcode (any version) from the App Store, then re-run." >&2
+  exit 1
+fi
+
 # Works from a local clone (./install.sh) or piped from curl (no repo on disk).
 repo_dir=""
 if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
