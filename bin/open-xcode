@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.1.0"
+VERSION="1.0.1"
 
 usage() {
   cat <<EOF
@@ -14,10 +14,12 @@ directory) and opens it in Xcode. With a name, matches it case-insensitively
 against workspace/project names and paths.
 
 Options:
-  -p, --print      print the selection without opening Xcode (alias: --dry-run)
-  -l, --list       list all candidates, best match first
-  -v, --version    print the version
-  -h, --help       show this help
+  -n, --named <name>    open the workspace/project matching <name>
+  -f, --folder <dir>    search only in <dir> (no git-root expansion)
+  -p, --print           print the selection without opening Xcode (alias: --dry-run)
+  -l, --list            list all candidates, best match first
+  -v, --version         print the version
+  -h, --help            show this help
 
 Environment:
   OPEN_XCODE_ROOT  search from this directory instead of the current one
@@ -27,28 +29,47 @@ platform folders, breaks ties by most recently used.
 EOF
 }
 
+need_arg() {
+  if [[ $# -lt 2 || -z "$2" ]]; then
+    echo "open-xcode: $1 requires an argument" >&2
+    exit 2
+  fi
+}
+
 print_only=0
 list_only=0
+named_query=""
+folder=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
     -v|--version) echo "open-xcode $VERSION"; exit 0 ;;
     -p|--print|--dry-run) print_only=1; shift ;;
     -l|--list) list_only=1; shift ;;
+    -n|--named) need_arg "$@"; named_query="$2"; shift 2 ;;
+    -f|--folder) need_arg "$@"; folder="$2"; shift 2 ;;
     --) shift; break ;;
     -*) echo "open-xcode: unknown option: $1" >&2; echo "Try 'open-xcode --help' for usage." >&2; exit 2 ;;
     *) break ;;
   esac
 done
 
-query="${*:-}"
+query="${named_query:-${*:-}}"
 query="$(printf '%s' "$query" | sed -E 's#^/open-(xcode|ios)[[:space:]]*##I; s#^[Oo]pen[[:space:]]+##; s#\.(xcworkspace|xcodeproj)$##I; s#^[[:space:]]+##; s#[[:space:]]+$##')"
 
-start_dir="${OPEN_XCODE_ROOT:-$PWD}"
-if repo_root="$(git -C "$start_dir" rev-parse --show-toplevel 2>/dev/null)"; then
-  root="$repo_root"
+if [[ -n "$folder" ]]; then
+  if [[ ! -d "$folder" ]]; then
+    echo "open-xcode: no such folder: $folder" >&2
+    exit 2
+  fi
+  root="$(cd "$folder" && pwd)"
 else
-  root="$start_dir"
+  start_dir="${OPEN_XCODE_ROOT:-$PWD}"
+  if repo_root="$(git -C "$start_dir" rev-parse --show-toplevel 2>/dev/null)"; then
+    root="$repo_root"
+  else
+    root="$start_dir"
+  fi
 fi
 
 normalize() {

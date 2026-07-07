@@ -7,6 +7,8 @@ open-xcode            # opens the best workspace/project in the current repo
 open-xcode Runner     # opens the workspace/project matching "Runner"
 open-xcode --print    # print the selection without opening Xcode
 open-xcode --list     # list all candidates, best match first
+open-xcode -n Runner  # same as positional name, as a flag
+open-xcode -f ~/code  # search only that folder (no git-root expansion)
 open-xcode --help     # full usage
 ```
 
