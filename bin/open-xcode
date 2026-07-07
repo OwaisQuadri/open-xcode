@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+print_only=0
+if [[ "${1:-}" == "--print" || "${1:-}" == "--dry-run" ]]; then
+  print_only=1
+  shift
+fi
+
+query="${*:-}"
+query="$(printf '%s' "$query" | sed -E 's#^/open-(xcode|ios)[[:space:]]*##I; s#^[Oo]pen[[:space:]]+##; s#\.(xcworkspace|xcodeproj)$##I; s#^[[:space:]]+##; s#[[:space:]]+$##')"
+
+start_dir="${OPEN_XCODE_ROOT:-$PWD}"
+if repo_root="$(git -C "$start_dir" rev-parse --show-toplevel 2>/dev/null)"; then
+  root="$repo_root"
+else
+  root="$start_dir"
+fi
+
+normalize() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's#\.(xcworkspace|xcodeproj)$##; s#[^a-z0-9]+##g'
+}
+
+last_used_epoch() {
+  local path="$1"
+  local used
+  used="$(mdls -raw -name kMDItemLastUsedDate "$path" 2>/dev/null || true)"
+  if [[ -n "$used" && "$used" != "(null)" ]]; then
+    date -j -f "%Y-%m-%d %H:%M:%S %z" "$used" +%s 2>/dev/null && return 0
+  fi
+  stat -f %m "$path"
+}
+
+declare -a candidates=()
+while IFS= read -r -d '' path; do
+  candidates+=("$path")
+done < <(
+  find "$root" \
+    \( -type d \( -name .git -o -name Pods -o -name build -o -name Build -o -name DerivedData -o -name .symlinks \) -prune \) -o \
+    \( -type d \( -name "*.xcworkspace" -o -name "*.xcodeproj" \) -print0 -prune \)
+)
+
+if [[ "${#candidates[@]}" -eq 0 ]]; then
+  echo "No .xcworkspace or .xcodeproj found under $root" >&2
+  exit 1
+fi
+
+query_norm="$(normalize "$query")"
+rank_pool() {
+  local require_match="$1"
+  local prefer_workspace="$2"
+  local path base base_norm platform_score type_score match_score epoch inverted_epoch
+
+  for path in "${candidates[@]}"; do
+    if [[ "$prefer_workspace" == "1" && "$path" != *.xcworkspace ]]; then
+      continue
+    fi
+
+    base="$(basename "$path")"
+    base_norm="$(normalize "$base")"
+    platform_score=50
+    [[ "$path" == */ios/* ]] && platform_score=0
+    type_score=100
+    [[ "$path" == *.xcworkspace ]] && type_score=0
+
+    match_score=50
+    if [[ -n "$query_norm" ]]; then
+      if [[ "$base_norm" == "$query_norm" ]]; then
+        match_score=0
+      elif [[ "$base_norm" == *"$query_norm"* || "$query_norm" == *"$base_norm"* ]]; then
+        match_score=10
+      elif [[ "$(normalize "$path")" == *"$query_norm"* ]]; then
+        match_score=20
+      elif [[ "$require_match" == "1" ]]; then
+        continue
+      fi
+    fi
+
+    epoch="$(last_used_epoch "$path")"
+    inverted_epoch=$((9999999999 - epoch))
+    printf '%03d\t%03d\t%03d\t%010d\t%s\n' "$match_score" "$platform_score" "$type_score" "$inverted_epoch" "$path"
+  done
+}
+
+has_workspace=0
+for candidate in "${candidates[@]}"; do
+  if [[ "$candidate" == *.xcworkspace ]]; then
+    has_workspace=1
+    break
+  fi
+done
+
+selected="$(
+  {
+    if [[ -n "$query_norm" ]]; then
+      rank_pool 1 0
+    elif [[ "$has_workspace" == "1" ]]; then
+      rank_pool 0 1
+    else
+      rank_pool 0 0
+    fi
+  } | sort -t $'\t' -k1,1n -k2,2n -k3,3n -k4,4n | head -n 1 | cut -f5-
+)"
+
+if [[ -z "$selected" && -n "$query_norm" ]]; then
+  selected="$(rank_pool 0 "$has_workspace" | sort -t $'\t' -k1,1n -k2,2n -k3,3n -k4,4n | head -n 1 | cut -f5-)"
+fi
+
+if [[ -z "$selected" ]]; then
+  echo "No matching Xcode workspace/project found under $root" >&2
+  exit 1
+fi
+
+echo "$selected"
+if [[ "$print_only" != "1" ]]; then
+  open "$selected"
+fi
