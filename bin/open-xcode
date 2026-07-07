@@ -1,11 +1,45 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+VERSION="1.1.0"
+
+usage() {
+  cat <<EOF
+open-xcode $VERSION — open the right Xcode workspace/project from anywhere in a repo
+
+Usage: open-xcode [options] [name]
+
+Finds the best .xcworkspace/.xcodeproj under the git repo root (or the current
+directory) and opens it in Xcode. With a name, matches it case-insensitively
+against workspace/project names and paths.
+
+Options:
+  -p, --print      print the selection without opening Xcode (alias: --dry-run)
+  -l, --list       list all candidates, best match first
+  -v, --version    print the version
+  -h, --help       show this help
+
+Environment:
+  OPEN_XCODE_ROOT  search from this directory instead of the current one
+
+Selection: prefers .xcworkspace over .xcodeproj, prefers /ios/ over sibling
+platform folders, breaks ties by most recently used.
+EOF
+}
+
 print_only=0
-if [[ "${1:-}" == "--print" || "${1:-}" == "--dry-run" ]]; then
-  print_only=1
-  shift
-fi
+list_only=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    -v|--version) echo "open-xcode $VERSION"; exit 0 ;;
+    -p|--print|--dry-run) print_only=1; shift ;;
+    -l|--list) list_only=1; shift ;;
+    --) shift; break ;;
+    -*) echo "open-xcode: unknown option: $1" >&2; echo "Try 'open-xcode --help' for usage." >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
 
 query="${*:-}"
 query="$(printf '%s' "$query" | sed -E 's#^/open-(xcode|ios)[[:space:]]*##I; s#^[Oo]pen[[:space:]]+##; s#\.(xcworkspace|xcodeproj)$##I; s#^[[:space:]]+##; s#[[:space:]]+$##')"
@@ -90,27 +124,33 @@ for candidate in "${candidates[@]}"; do
   fi
 done
 
-selected="$(
+ranked="$(
   {
     if [[ -n "$query_norm" ]]; then
       rank_pool 1 0
-    elif [[ "$has_workspace" == "1" ]]; then
+    elif [[ "$has_workspace" == "1" && "$list_only" != "1" ]]; then
       rank_pool 0 1
     else
       rank_pool 0 0
     fi
-  } | sort -t $'\t' -k1,1n -k2,2n -k3,3n -k4,4n | head -n 1 | cut -f5-
+  } | sort -t $'\t' -k1,1n -k2,2n -k3,3n -k4,4n | cut -f5-
 )"
 
-if [[ -z "$selected" && -n "$query_norm" ]]; then
-  selected="$(rank_pool 0 "$has_workspace" | sort -t $'\t' -k1,1n -k2,2n -k3,3n -k4,4n | head -n 1 | cut -f5-)"
+if [[ -z "$ranked" && -n "$query_norm" ]]; then
+  ranked="$(rank_pool 0 "$has_workspace" | sort -t $'\t' -k1,1n -k2,2n -k3,3n -k4,4n | cut -f5-)"
 fi
 
-if [[ -z "$selected" ]]; then
+if [[ -z "$ranked" ]]; then
   echo "No matching Xcode workspace/project found under $root" >&2
   exit 1
 fi
 
+if [[ "$list_only" == "1" ]]; then
+  printf '%s\n' "$ranked"
+  exit 0
+fi
+
+selected="$(head -n 1 <<<"$ranked")"
 echo "$selected"
 if [[ "$print_only" != "1" ]]; then
   open "$selected"

@@ -6,6 +6,8 @@ Open the right Xcode workspace or project from anywhere in a repo — no more hu
 open-xcode            # opens the best workspace/project in the current repo
 open-xcode Runner     # opens the workspace/project matching "Runner"
 open-xcode --print    # print the selection without opening Xcode
+open-xcode --list     # list all candidates, best match first
+open-xcode --help     # full usage
 ```
 
 ## How it picks
